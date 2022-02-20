@@ -1,0 +1,61 @@
+image: python:3.8
+
+services:
+  - postgres:13.3
+  - redis:5.0.7
+
+stages:
+  - test
+  - deploy
+
+variables:
+  APP_NAME: test_app
+  POSTGRES_HOST_AUTH_METHOD: trust
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+
+cache:
+  paths:
+    - .cache/pip
+    - venv/
+    - apt-cache/
+
+before_script:
+  # Define APT cache directory
+  - export APT_CACHE_DIR=`pwd`/apt-cache && mkdir -pv $APT_CACHE_DIR
+  - apt-get update -yq && apt-get -o dir::cache::archives="$APT_CACHE_DIR" install -y python-dev python3-pip
+  - pip install virtualenv
+  - virtualenv venv
+  - source venv/bin/activate
+  - python -m pip install --upgrade pip
+  - pip install -r requirements.txt
+  # Install ssh-agent if not already installed, it is required by Docker.
+  # (change apt-get to yum if you use a CentOS-based image)
+  - which ssh-agent || (apt-get install openssh-client -y)
+  # Run ssh-agent (inside the build environment)
+  - eval $(ssh-agent -s)
+  # Add the SSH key stored in SSH_PRIVATE_KEY variable to the agent store
+  - ssh-add <(echo "$SSH_PRIVATE_KEY")
+  - mkdir logs
+  - chmod +x ./setup_test_env.sh
+  - . setup_test_env.sh
+
+
+
+test:
+  tags:
+    - docker
+  stage: test
+  script:
+    - python manage.py test --settings=hugo.settings_test
+
+deploy_prod:
+  stage: deploy
+  script:
+    - fab -H web@testhost.com full-deploy --branch master
+  when: manual
+  only:
+    - master
+
+
+
